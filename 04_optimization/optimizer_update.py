@@ -1,5 +1,8 @@
-# Optimizer update rules from scratch (PyTorch) with official optimizer check.
-# Prescribed gradients isolate the update rule: SGD, Momentum, and Adam.
+"""Optimizer update rules from scratch (PyTorch) with official optimizer check.
+
+Prescribed gradients isolate the update rule: SGD, Momentum, and Adam.
+Manual updates must match torch.optim after every step to 1e-12.
+"""
 
 import torch
 
@@ -10,13 +13,13 @@ gradients = [torch.tensor(g, dtype=torch.float64)
 lr = 0.03
 momentum = 0.9
 
-# ---- Manual SGD: w = w - lr * g ----
+# ---------- 1. Manual SGD: w = w - lr * g ----------
 param_sgd = torch.tensor([1., -2.], dtype=torch.float64)
 for g in gradients:
     param_sgd = param_sgd - lr * g
 print("manual SGD:", param_sgd)
 
-# ---- Manual Momentum: velocity accumulates history with decay ----
+# ---------- 2. Manual Momentum: velocity accumulates history with decay ----------
 param_mom = torch.tensor([1., -2.], dtype=torch.float64)
 velocity = torch.zeros(2, dtype=torch.float64)
 for g in gradients:
@@ -24,7 +27,7 @@ for g in gradients:
     param_mom = param_mom - lr * velocity
 print("manual Momentum:", param_mom)
 
-# ---- Official SGD check ----
+# ---------- 3. Official SGD check ----------
 ref_sgd = torch.nn.Parameter(torch.tensor([1., -2.], dtype=torch.float64))
 opt_sgd = torch.optim.SGD([ref_sgd], lr=lr, momentum=0)
 for g in gradients:
@@ -32,7 +35,7 @@ for g in gradients:
     opt_sgd.step()
 torch.testing.assert_close(param_sgd, ref_sgd.detach(), atol=1e-12, rtol=1e-12)
 
-# ---- Official Momentum check ----
+# ---------- 4. Official Momentum check ----------
 ref_mom = torch.nn.Parameter(torch.tensor([1., -2.], dtype=torch.float64))
 opt_mom = torch.optim.SGD([ref_mom], lr=lr, momentum=momentum)
 for g in gradients:
@@ -40,7 +43,7 @@ for g in gradients:
     opt_mom.step()
 torch.testing.assert_close(param_mom, ref_mom.detach(), atol=1e-12, rtol=1e-12)
 
-# ---- Manual Adam: first/second moments with bias correction ----
+# ---------- 5. Manual Adam: first/second moments with bias correction ----------
 param_adam = torch.tensor([1., -2.], dtype=torch.float64)
 first = torch.zeros(2, dtype=torch.float64)
 second = torch.zeros(2, dtype=torch.float64)
@@ -54,7 +57,7 @@ for t, g in enumerate(gradients, 1):
     param_adam = param_adam - lr * direction
 print("manual Adam:", param_adam)
 
-# ---- Official Adam check ----
+# ---------- 6. Official Adam check ----------
 ref_adam = torch.nn.Parameter(torch.tensor([1., -2.], dtype=torch.float64))
 opt_adam = torch.optim.Adam([ref_adam], lr=lr, betas=(0.9, 0.999), eps=1e-8)
 for g in gradients:
