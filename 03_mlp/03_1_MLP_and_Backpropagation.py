@@ -1,7 +1,14 @@
-"""MLP forward/backward from scratch (NumPy) with autograd gradient check.
+"""03.1 MLP and Backpropagation.
 
-Single sample: x(4,) -> ReLU hidden(5,) -> output(2,).
-Manual chain-rule gradients must match torch autograd to 1e-12.
+From scratch in NumPy: single-sample MLP
+    x(4) -> linear(4,5) -> ReLU -> linear(5,2) -> y(2)
+with hand-derived chain-rule gradients, verified against torch autograd to 1e-12.
+
+Dimensions:
+    x: (4,)   W1: (5,4)   b1: (5,)
+    h: (5,)   a = relu(h): (5,)
+    W2: (2,5) b2: (2,)
+    y: (2,)
 """
 
 import numpy as np
@@ -17,22 +24,25 @@ def relu(z):
 
 # ---------- 2. MLP forward: x -> W1@x+b1 -> relu -> W2@a+b2 -> y ----------
 def mlp_forward(x, W1, b1, W2, b2):
-    h = W1 @ x + b1
-    a = relu(h)
-    y = W2 @ a + b2
-    return y, (x, h, a, W1, W2)  # cache for backward
+    h = W1 @ x + b1          # pre-activation, (5,)
+    a = relu(h)              # post-activation, (5,)
+    y = W2 @ a + b2          # output, (2,)
+    # cache everything needed for the backward pass
+    return y, (x, h, a, W1, W2)
 
 
 # ---------- 3. MLP backward: chain rule, gradient flows from y back to W1 ----------
 def mlp_backward(y, target, cache):
     x, h, a, W1, W2 = cache
-    dy = y - target
-    dW2 = np.outer(dy, a)
-    db2 = dy.copy()
-    da = W2.T @ dy
-    dh = da * (h > 0)  # ReLU derivative: pass gradient where h > 0
-    dW1 = np.outer(dh, x)
-    db1 = dh.copy()
+    # MSE loss L = 0.5 * ||y - target||^2, so dy = y - target
+    dy = y - target                       # (2,)
+    dW2 = np.outer(dy, a)                 # outer product: (2,5)
+    db2 = dy.copy()                       # (2,)
+    da = W2.T @ dy                        # (5,)
+    # ReLU derivative: pass gradient only where h > 0 (zero where h <= 0)
+    dh = da * (h > 0)
+    dW1 = np.outer(dh, x)                 # outer product: (5,4)
+    db1 = dh.copy()                       # (5,)
     return dW1, db1, dW2, db2
 
 

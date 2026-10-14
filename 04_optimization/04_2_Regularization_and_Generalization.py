@@ -1,4 +1,4 @@
-"""04.2 Regularization and Generalization
+"""04.2 Regularization and Generalization.
 
 Verifies three regularization mechanisms numerically:
 1. L2-in-the-loss equals SGD weight decay (one step).
@@ -14,6 +14,8 @@ torch.manual_seed(4)
 torch.set_num_threads(1)
 
 # ---------- 1. L2 in the loss == SGD weight decay ----------
+# Both routes shrink w by the same factor: proof that they are algebraically
+# identical for SGD (this breaks for Adam, which is why AdamW exists).
 w1 = torch.nn.Parameter(torch.tensor([2., -3.], dtype=torch.float64))
 w2 = torch.nn.Parameter(w1.detach().clone())
 g = torch.tensor([0.4, -0.2], dtype=torch.float64)
@@ -46,6 +48,8 @@ torch.testing.assert_close(w3, expected)
 print("AdamW first step:", w3.detach())
 
 # ---------- 3. Dropout: preserve expectation, identity at eval ----------
+# In train mode, dropout multiplies each activation by 1/(1-p) when kept,
+# so the expected value is unchanged (inverted dropout). In eval, it's identity.
 dropout = torch.nn.Dropout(p=0.5)
 values = torch.full((20000,), 2.0)
 
@@ -59,6 +63,8 @@ torch.testing.assert_close(dropout(values), values)
 print("eval identity OK")
 
 # ---------- 4. Ridge regression on an underdetermined problem ----------
+# 25 samples, 40 features: ordinary least squares is underdetermined, so
+# larger lambda pulls the weight norm down and trades train error for val.
 rng = np.random.default_rng(8)
 X = rng.normal(size=(180, 40))
 truth = np.zeros(40)
@@ -70,6 +76,7 @@ a, v = y[:25], y[25:]
 print("\nlam    train_mse  val_mse   ||w||")
 for lam in [0.0, 0.01, 0.1, 1.0, 10.0]:
     # Augment the system: rows sqrt(25*lam)*I pull weights toward zero.
+    # Solving least squares on [A; sqrt(n*lam)*I] is equivalent to ridge.
     A_aug = np.vstack([A, np.sqrt(25 * lam) * np.eye(40)])
     a_aug = np.concatenate([a, np.zeros(40)])
     w, *_ = np.linalg.lstsq(A_aug, a_aug, rcond=None)

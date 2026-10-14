@@ -1,4 +1,4 @@
-"""Pooling, normalization, and residual checks for lesson 05.2 (PyTorch).
+"""05.2 Pooling, Normalization, and Residual Connections.
 
 Part 1: pooling backward (max routes to the argmax, avg splits evenly),
         manual BatchNorm/LayerNorm forward, and the identity residual branch.
@@ -18,10 +18,13 @@ torch.manual_seed(1)
 x = torch.tensor([[[[1., 3.], [2., 0.]]]], requires_grad=True)
 maximum = F.max_pool2d(x, 2)
 maximum.sum().backward()
-torch.testing.assert_close(x.grad, torch.tensor([[[[0., 1.], [0., 0.]]]]))   # grad -> argmax
+# Max-pool backward: gradient goes only to the winning (argmax) position
+torch.testing.assert_close(x.grad, torch.tensor([[[[0., 1.], [0., 0.]]]]))
 average = F.avg_pool2d(x.detach(), 2)
-torch.testing.assert_close(average, torch.tensor([[[[1.5]]]]))               # (1+3+2+0)/4
+# Avg-pool: the 4 inputs share the output evenly, each gets 1/4
+torch.testing.assert_close(average, torch.tensor([[[[1.5]]]]))
 
+# BatchNorm: normalize per channel over (N, H, W) dimensions
 features = torch.randn(4, 3, 5, 5)
 bn = nn.BatchNorm2d(3, affine=False, track_running_stats=False)
 mean = features.mean(dim=(0, 2, 3), keepdim=True)        # per channel, over (N,H,W)
@@ -29,12 +32,14 @@ var = features.var(dim=(0, 2, 3), unbiased=False, keepdim=True)
 manual_bn = (features - mean) / torch.sqrt(var + bn.eps)
 torch.testing.assert_close(bn(features), manual_bn, atol=1e-6, rtol=1e-5)
 
+# LayerNorm: normalize per example over the feature dimension
 sequence = torch.randn(2, 4, 6)
 ln = nn.LayerNorm(6, elementwise_affine=False)            # per example, over last dim
 mu = sequence.mean(-1, keepdim=True)
 variance = sequence.var(-1, unbiased=False, keepdim=True)
 torch.testing.assert_close(ln(sequence), (sequence - mu) / (variance + ln.eps).sqrt())
 
+# Identity residual: y = x + 0, gradient flows straight back to x
 branch = nn.Linear(3, 3, bias=False)                      # identity residual: y = x + 0
 with torch.no_grad():
     branch.weight.zero_()
@@ -46,9 +51,10 @@ torch.testing.assert_close(outputs, inputs)
 print("pooling, normalization, and residual checks passed")
 
 # ---------- 2. BN train/eval buffers and batch dependence ----------
+# Avg-pool backward with upstream 2: each input gets 2 * 1/4 = 0.5
 avg_input = torch.tensor([[[[1.,3.],[2.,0.]]]], dtype=torch.float64, requires_grad=True)
 (2*F.avg_pool2d(avg_input,2)).sum().backward()
-torch.testing.assert_close(avg_input.grad, torch.full_like(avg_input, .5))   # 2 * 1/4
+torch.testing.assert_close(avg_input.grad, torch.full_like(avg_input, .5))
 
 torch.manual_seed(502)
 data = torch.randn(4,3,2,2,dtype=torch.float64)
@@ -59,30 +65,37 @@ batch_unbiased = data.var((0,2,3), unbiased=True)         # running buffer uses 
 result = tracked(data)
 torch.testing.assert_close(result,(data-batch_mean[None,:,None,None])/
                        (batch_var[None,:,None,None]+tracked.eps).sqrt())
+# running_mean/momentum buffers are EMA-updated from batch statistics
 torch.testing.assert_close(tracked.running_mean, .1*batch_mean)
 torch.testing.assert_close(tracked.running_var, .9*torch.ones_like(batch_var)+.1*batch_unbiased)
 
+# In eval mode, BN uses the frozen running buffers, NOT the current batch
 tracked.eval()                                            # frozen buffers: batch changes don't matter
 changed = data.clone(); changed[1:] += 100
 torch.testing.assert_close(tracked(data)[0], tracked(changed)[0])
 
-untracked = nn.BatchNorm2d(3,affine=False,track_running_stats=False).double()   # no buffers
+# Without track_running_stats, BN always uses the current batch (even in eval)
+untracked = nn.BatchNorm2d(3,affine=False,track_running_stats=False).double()
 assert not torch.allclose(untracked(data)[0], untracked(changed)[0])
 untracked.eval()
 assert not torch.allclose(untracked(data)[0], untracked(changed)[0])
 
-per_example = nn.LayerNorm([3,2,2],elementwise_affine=False).double()         # LN: per-example
+# LayerNorm is per-example, so changing other examples doesn't affect this one
+per_example = nn.LayerNorm([3,2,2],elementwise_affine=False).double()
 torch.testing.assert_close(per_example(data)[0], per_example(changed)[0])
 wrong_axis = nn.LayerNorm(2,elementwise_affine=False).double()               # LayerNorm(2) = width
 torch.testing.assert_close(wrong_axis(data).mean(-1), torch.zeros(4,3,2,dtype=torch.float64),
                            atol=1e-12,rtol=0)
 
+# Residual cancellation: L = (x - x) = 0, gradient wrt x must be exactly zero
 cancel = torch.randn(2,3,requires_grad=True)
 (cancel-cancel).sum().backward()
-torch.testing.assert_close(cancel.grad, torch.zeros_like(cancel))            # cancellation
+torch.testing.assert_close(cancel.grad, torch.zeros_like(cancel))
 print("BN train/eval buffers, batch dependence, LN axes, and residual cancellation verified")
 
 # ---------- 3. LayerNorm backward through mean/variance statistics ----------
+# dx = (1/sigma) * [u - mean(u) - x_hat * mean(u * x_hat)]
+# The extra terms come from dx depending on mean and var (which depend on x).
 torch.manual_seed(503)
 ln_input = torch.randn(2,3,5,dtype=torch.float64,requires_grad=True)
 affine_ln = nn.LayerNorm(5).double()
@@ -101,8 +114,11 @@ with torch.no_grad():
     manual_dx = inverse_scale*(u-u.mean(-1,keepdim=True)-
                                normalized*(u*normalized).mean(-1,keepdim=True))
     torch.testing.assert_close(manual_dx, ln_input.grad, atol=1e-11, rtol=1e-9)
+    # gamma gradient = sum over batch of upstream * x_hat
     torch.testing.assert_close(affine_ln.weight.grad, (upstream*normalized).sum((0,1)))
     torch.testing.assert_close(affine_ln.bias.grad, upstream.sum((0,1)))
+    # A sanity property: dx sums to zero along the normalized dimension
+    # (because the normalization is invariant to shifting x along that axis)
     torch.testing.assert_close(manual_dx.sum(-1), torch.zeros(2,3,dtype=torch.float64),
-                               atol=1e-11,rtol=0)       # grad sums to 0 along norm dim
+                               atol=1e-11,rtol=0)
 print("LayerNorm input/affine backward through statistics verified")

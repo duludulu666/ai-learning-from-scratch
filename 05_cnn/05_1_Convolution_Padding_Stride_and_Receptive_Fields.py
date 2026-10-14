@@ -1,4 +1,10 @@
-"""Convolution (cross-correlation) from scratch for lesson 05.1 (NumPy + PyTorch).
+"""05.1 Convolution, Padding, Stride, and Receptive Fields.
+
+From scratch in NumPy + PyTorch: manual 2D cross-correlation with
+padding/stride/dilation, verified against F.conv2d.
+
+Note: deep-learning "convolution" is actually cross-correlation (kernel is
+NOT flipped). The gradient through a conv layer is two more correlations.
 
 Part 1: manual 2D correlation with padding/stride/dilation, verified vs F.conv2d.
 Part 2: shared-weight kernel gradient: with L = sum(Y), the gradient is the
@@ -18,6 +24,7 @@ import torch.nn.functional as F
 def correlate2d(image, kernel, padding=0, stride=1, dilation=1):
     padded = np.pad(image, ((padding, padding), (padding, padding)))   # zero pad all sides
     kh, kw = kernel.shape
+    # dilation spreads kernel entries apart, so the effective window grows
     eh, ew = dilation * (kh - 1) + 1, dilation * (kw - 1) + 1   # effective kernel size
     oh = (padded.shape[0] - eh) // stride + 1   # output height from valid slide starts
     ow = (padded.shape[1] - ew) // stride + 1
@@ -42,6 +49,8 @@ np.testing.assert_allclose(actual.detach().numpy()[0, 0], manual)
 np.testing.assert_allclose(manual, np.full((2, 2), -4.))
 
 actual.sum().backward()   # upstream gradient all ones: L = sum(Y)
+# The same kernel slides over 4 positions, so its gradient accumulates
+# every patch it touched.
 expected_dw = np.zeros_like(kernel)
 for i in range(2):
     for j in range(2):
@@ -61,11 +70,14 @@ for padding, stride, dilation in [(1, 2, 1), (2, 1, 2)]:
     np.testing.assert_allclose(result.numpy()[0, 0], manual2, atol=1e-12)
     print("output shape:", result.shape)
 
+# Conv2d weight shape is (C_out, C_in, kh, kw); bias has C_out entries
 layer = torch.nn.Conv2d(3, 8, kernel_size=3, padding=1)
 print("weight:", layer.weight.shape)   # (C_out, C_in, kh, kw)
 assert sum(p.numel() for p in layer.parameters()) == 8 * 3 * 3 * 3 + 8
 
 # ---------- 4. Nonuniform upstream: input/kernel gradients + finite difference ----------
+# With upstream = u[i,j] at each output position, the kernel gradient is
+# sum of u[i,j] * patch[i,j]; the input gradient scatters u[i,j]*kernel back.
 upstream = np.array([[1., -2.], [.5, 3.]])
 gx = np.zeros_like(image)
 gk = np.zeros_like(kernel)
@@ -87,6 +99,8 @@ numeric = ((correlate2d(image, plus) - correlate2d(image, minus)) * upstream).su
 np.testing.assert_allclose(numeric, gk[0, 1], atol=1e-8)
 
 # ---------- 5. Multi-channel: output sums over input channels, not averages ----------
+# Each output channel = sum over input channels of one filter convolved with
+# its input channel (then add bias).
 random = np.random.default_rng(501)
 batch = random.normal(size=(2, 2, 4, 4))
 filters = random.normal(size=(3, 2, 2, 2))   # (C_out, C_in, kh, kw)

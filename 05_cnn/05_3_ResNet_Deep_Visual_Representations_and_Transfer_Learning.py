@@ -1,9 +1,9 @@
-"""Tiny ResNet for lesson 05.3 (PyTorch).
+"""05.3 ResNet, Deep Visual Representations, and Transfer Learning.
 
-BasicBlock: two 3x3 conv+BN, residual shortcut (1x1 conv when shape changes).
-TinyResNet: stem -> two blocks -> adaptive pool -> linear head.
+BasicBlock: two 3x3 conv+BN+ReLU, residual shortcut (1x1 conv when shape changes).
+TinyResNet: stem conv -> two blocks -> adaptive pool -> linear head.
 Also verifies freezing the backbone (requires_grad=False + eval) so only
-the linear head updates.
+the linear head updates -- the core of transfer learning / fine-tuning.
 """
 
 import torch
@@ -21,7 +21,9 @@ class BasicBlock(nn.Module):
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.activation = nn.ReLU()
-        # shortcut: identity when shape matches, 1x1 conv when stride/channel changes
+        # shortcut: identity when shape matches, 1x1 conv when stride/channel changes.
+        # The 1x1 conv projects x to the same shape as the residual branch output
+        # so we can add them.
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, 1, stride=stride, bias=False),
@@ -34,6 +36,7 @@ class BasicBlock(nn.Module):
         identity = self.shortcut(x)
         z = self.activation(self.bn1(self.conv1(x)))
         z = self.bn2(self.conv2(z))
+        # Residual connection: output = F(x) + x (or projected x)
         return self.activation(z + identity)
 
 
@@ -41,16 +44,18 @@ class BasicBlock(nn.Module):
 class TinyResNet(nn.Module):
     def __init__(self, classes=3):
         super().__init__()
+        # Backbone: feature extractor (would be pretrained in transfer learning)
         self.backbone = nn.Sequential(
             nn.Conv2d(1, 8, 3, padding=1, bias=False),
             nn.BatchNorm2d(8),
             nn.ReLU(),
             BasicBlock(8, 8),
             BasicBlock(8, 16, stride=2),
-            nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
+            nn.AdaptiveAvgPool2d(1),   # global average pool -> (B, 16, 1, 1)
+            nn.Flatten(),              # -> (B, 16)
         )
-        self.head = nn.Linear(16, classes)
+        self.head = nn.Linear(16, classes)   # task-specific classifier
+        # Kaiming initialization: the standard choice for ReLU networks
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
@@ -68,14 +73,16 @@ assert logits.shape == (4, 3)
 nn.CrossEntropyLoss()(logits, labels).backward()
 assert all(torch.isfinite(p.grad).all() for p in model.parameters())
 
+# Freeze the backbone: no gradient, no parameter update
 for p in model.backbone.parameters():
     p.requires_grad_(False)
 model.zero_grad(set_to_none=True)   # clear grads left by the first backward
-model.backbone.eval()               # freeze BN running buffers too
+model.backbone.eval()               # freeze BN running buffers too (transfer learning!)
 opt = torch.optim.SGD(model.head.parameters(), lr=0.1)
 opt.zero_grad()
 nn.CrossEntropyLoss()(model(images), labels).backward()
 opt.step()
+# Backbone params should have no gradient at all after this step
 assert all(p.grad is None for p in model.backbone.parameters())
 
 print("logits:", logits.shape, "parameters:", sum(p.numel() for p in model.parameters()))

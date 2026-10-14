@@ -1,7 +1,15 @@
-"""Optimizer update rules from scratch (PyTorch) with official optimizer check.
+"""04.1 Optimizers and Training Stability.
 
-Prescribed gradients isolate the update rule: SGD, Momentum, and Adam.
-Manual updates must match torch.optim after every step to 1e-12.
+From scratch in PyTorch: prescribed gradients (a fixed sequence) isolate the
+update rule itself, so we can check SGD, Momentum, and Adam line-by-line
+against torch.optim to 1e-12.
+
+Update rules:
+    SGD:       w <- w - lr * g
+    Momentum:  v <- mu * v + g,   w <- w - lr * v
+    Adam:      m <- b1*m + (1-b1)*g,  s <- b2*s + (1-b2)*g^2
+               m_hat = m/(1-b1^t),  s_hat = s/(1-b2^t)
+               w <- w - lr * m_hat / (sqrt(s_hat) + eps)
 """
 
 import torch
@@ -49,8 +57,9 @@ first = torch.zeros(2, dtype=torch.float64)
 second = torch.zeros(2, dtype=torch.float64)
 beta1, beta2, eps = 0.9, 0.999, 1e-8
 for t, g in enumerate(gradients, 1):
-    first = beta1 * first + (1 - beta1) * g
-    second = beta2 * second + (1 - beta2) * g.square()
+    first = beta1 * first + (1 - beta1) * g          # EMA of gradient
+    second = beta2 * second + (1 - beta2) * g.square()  # EMA of g^2
+    # Bias correction: early moments are biased toward zero, scale them up
     first_hat = first / (1 - beta1 ** t)
     second_hat = second / (1 - beta2 ** t)
     direction = first_hat / (second_hat.sqrt() + eps)

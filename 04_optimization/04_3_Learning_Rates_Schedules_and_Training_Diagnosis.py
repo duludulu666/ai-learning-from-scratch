@@ -1,4 +1,4 @@
-"""Learning-rate stability demo for lesson 04.3 (PyTorch).
+"""04.3 Learning Rates, Schedules, and Training Diagnosis.
 
 Part 1: exact scalar quadratic L = 1/2*(theta-3)^2 under four learning
         rates: stable convergence, one-step landing, oscillation, divergence.
@@ -17,6 +17,8 @@ from torch import nn
 
 
 # ---------- 1. Exact scalar quadratic: four learning-rate fates ----------
+# L = 1/2*(theta-3)^2, gradient = (theta-3), so theta' = theta - lr*(theta-3).
+# lr < 2/stable, lr=1 lands in one step, 1 < lr < 2 oscillates, lr > 2 diverges.
 for rate in [0.1, 1.0, 2.0, 2.2]:
     theta = 0.0
     losses = []
@@ -64,6 +66,9 @@ assert max(first_grads) - min(first_grads) < 1e-10
 print("OK")
 
 # ---------- 3. Exact loss ratio: L(theta')/L(theta) = (1 - eta*a)^2 ----------
+# For L = 1/2 * curvature * error^2, one GD step changes error by
+# error' = error - eta * curvature * error = (1 - eta*curvature) * error,
+# so the loss ratio is exactly (1 - eta*curvature)^2.
 for curvature in (1., 100.):
     for rate in (.1 / curvature, 1 / curvature, 2 / curvature, 2.2 / curvature):
         error = -3.0

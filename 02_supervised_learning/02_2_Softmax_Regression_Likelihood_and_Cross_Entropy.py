@@ -1,7 +1,12 @@
-"""Softmax regression from scratch (NumPy) with autograd gradient check.
+"""02.2 Softmax Regression, Likelihood, and Cross-Entropy.
 
-3-class toy classification on Gaussian clusters. Accuracy > 98%.
-Cross-entropy + softmax simplifies to dz = p - y_onehot in the backward pass.
+From scratch in NumPy: 3-class toy classification on three Gaussian clusters,
+trained by gradient descent on the cross-entropy loss, then verified against
+torch autograd.
+
+The key algebraic simplification: with cross-entropy loss and softmax output,
+the gradient at the logits is just  dz = p - y_onehot  (no chain-rule product
+of softmax derivatives needed).
 """
 
 import numpy as np
@@ -10,26 +15,28 @@ import torch
 np.random.seed(42)
 
 # ---------- 1. Generate 3-class toy data: three Gaussian clusters ----------
-X1 = np.random.randn(50, 2) + [2, 2]
-X2 = np.random.randn(50, 2) + [-2, 2]
-X3 = np.random.randn(50, 2) + [0, -2]
+X1 = np.random.randn(50, 2) + [2, 2]      # class 0: center (2, 2)
+X2 = np.random.randn(50, 2) + [-2, 2]    # class 1: center (-2, 2)
+X3 = np.random.randn(50, 2) + [0, -2]   # class 2: center (0, -2)
 X = np.vstack([X1, X2, X3])
 
-# Labels: class 0, 1, 2 (50 samples each)
+# Integer labels 0/1/2, 50 samples each
 y = np.array([0] * 50 + [1] * 50 + [2] * 50)
 
-# ---------- 2. One-hot encoding ----------
+# ---------- 2. One-hot encoding: (150, 3), each row has a single 1 ----------
 y_onehot = np.zeros((150, 3))
 y_onehot[np.arange(150), y] = 1
 
 # ---------- 3. Initialize parameters ----------
+# W is (2, 3): two input features, three output logits
 W = np.random.randn(2, 3) * 0.01
 b = np.zeros(3)
 lr = 0.01
 
 
 def softmax(z):
-    # Numerically stable: subtract row max before exp
+    # Numerically stable softmax: subtract row max before exp to avoid overflow.
+    # The shift cancels out in the normalization, so probabilities are unchanged.
     z = z - z.max(axis=1, keepdims=True)
     exp_z = np.exp(z)
     return exp_z / exp_z.sum(axis=1, keepdims=True)
@@ -37,19 +44,20 @@ def softmax(z):
 
 # ---------- 4. Training loop: manual gradient descent ----------
 for epoch in range(1000):
-    # Forward
+    # Forward: logits -> softmax probabilities
     z = X @ W + b
     p = softmax(z)
 
-    # Cross-entropy loss
+    # Cross-entropy loss: -mean over samples of sum_c y_c log p_c
     loss = -np.mean(np.sum(y_onehot * np.log(p + 1e-12), axis=1))
 
-    # Backward: dL/dz = p - y_onehot (beautiful simplification)
+    # Backward: the famous simplification dL/dz = p - y_onehot.
+    # (Derived by differentiating softmax and cross-entropy together.)
     dz = p - y_onehot
-    dW = X.T @ dz / 150
+    dW = X.T @ dz / 150      # average over the 150 samples
     db = dz.mean(axis=0)
 
-    # Update
+    # Gradient descent update
     W -= lr * dW
     b -= lr * db
 
